@@ -219,6 +219,7 @@ def extract_location_values(row):
 
 
 # --- PDF Generation (Rack Labels) ---
+# --- UPDATED FUNCTION: Increased Spacer to 1.2*cm for better distribution ---
 def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -265,13 +266,15 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        elements.extend([part_table1, Spacer(1, 0.3 * cm), part_table2, Spacer(1, 0.3 * cm), location_table, Spacer(1, 0.2 * cm)])
+        # INCREASED SPACER HERE
+        elements.extend([part_table1, Spacer(1, 0.3 * cm), part_table2, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.2 * cm)])
         label_count += 1
         
     if elements: doc.build(elements)
     buffer.seek(0)
     return buffer, label_summary
 
+# --- UPDATED FUNCTION: Increased Spacer to 1.5*cm for better distribution ---
 def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -313,7 +316,8 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        elements.extend([part_table, Spacer(1, 0.3 * cm), location_table, Spacer(1, 0.2 * cm)])
+        # INCREASED SPACER HERE
+        elements.extend([part_table, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.5 * cm)])
         label_count += 1
         
     if elements: doc.build(elements)
