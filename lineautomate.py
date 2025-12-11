@@ -85,41 +85,41 @@ def format_description(desc):
     if not desc or not isinstance(desc, str): desc = str(desc)
     return Paragraph(desc, desc_style)
 
-# --- NEW FUNCTION: Robust Auto-Sizing for Location Values ---
-def get_auto_sized_paragraph(text, base_size=16, alignment=TA_CENTER, is_bold=False):
+# --- NEW FUNCTION: Per-Cell Specific Auto-Adjustment ---
+def get_smart_sized_paragraph(text, char_threshold, base_size=16, alignment=TA_CENTER, is_bold=False):
     """
-    Dynamically adjusts font size based on text length to fit cells.
-    Specifically tuned for cases like '9M' vs '13.5M'.
+    Adjusts font size based on the text length relative to a specific threshold 
+    for that cell column.
     """
     text = str(text).strip()
     length = len(text)
     
-    # --- Auto-Size Logic ---
-    if length <= 3:
-        # Fits '9M', 'A', '12' perfectly
+    # Calculate size deduction
+    if length <= char_threshold:
         size = base_size
-    elif length <= 6:
-        # Fits '13.5M', '1200' -> Moderate reduction
+    elif length <= char_threshold + 2:
+        # Slightly over threshold (e.g. 13.5M vs threshold 3)
         size = base_size - 3
-    elif length <= 9:
-        # Fits longer codes -> Significant reduction
+    elif length <= char_threshold + 5:
+        # Moderately over
         size = base_size - 5
     else:
-        # Very long text -> Max reduction
+        # Significantly over
         size = base_size - 7
-        
-    # Safety floor to ensure text remains visible (min 6pt)
+
+    # Ensure text is never too small to read
     if size < 6: size = 6
 
     font_name = 'Helvetica-Bold' if is_bold else 'Helvetica'
-    style_name = f'Auto_{size}_{alignment}_{is_bold}_{text}' # Unique style name
+    # Unique style name to prevent conflicts
+    style_name = f'Smart_{size}_{alignment}_{is_bold}_{text}_{char_threshold}'
     
     style = ParagraphStyle(
         name=style_name, 
         fontName=font_name, 
         fontSize=size, 
         alignment=alignment, 
-        leading=size + 1 
+        leading=size + 1
     )
     return Paragraph(text, style)
 
@@ -239,7 +239,7 @@ def create_location_key(row):
     return '_'.join([str(row.get(c, '')) for c in ['Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']])
 
 def extract_location_values(row):
-    # 'Bus Model' is the first element, so auto-sizing will apply to it specifically
+    # Returns [Bus Model, Station No, Rack, Rack No 1st, Rack No 2nd, Level, Cell]
     return [str(row.get(c, '')) for c in ['Bus Model', 'Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']]
 
 
@@ -275,9 +275,22 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
         
         location_values = extract_location_values(part1)
         
-        # --- APPLIED AUTO-ADJUST: Base Size 14 for V1 ---
+        # --- PER-CELL ADJUSTMENT LOGIC ---
+        # Defines safe character counts for each column index:
+        # 0 (Model): 3 chars (e.g. "9M" ok, "13.5M" shrink)
+        # 1 (Station): 6 chars (e.g. "ST-01")
+        # 2-6 (Rack/Levels): 2 chars (e.g. "A", "12")
+        thresholds = [3, 6, 2, 2, 2, 2, 2]
+        
+        loc_vals_paras = []
+        for idx, val in enumerate(location_values):
+             # Ensure we don't go out of bounds if headers change, default to 3
+            thresh = thresholds[idx] if idx < len(thresholds) else 3
+            # Base size 14 for V1
+            para = get_smart_sized_paragraph(val, thresh, base_size=14)
+            loc_vals_paras.append(para)
+
         loc_header = Paragraph('Line Location', location_header_style)
-        loc_vals_paras = [get_auto_sized_paragraph(val, base_size=14) for val in location_values]
         location_data = [[loc_header] + loc_vals_paras]
         
         col_props = [1.8, 2.7, 1.3, 1.3, 1.3, 1.3, 1.3]
@@ -329,9 +342,17 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
         
         location_values = extract_location_values(part1)
         
-        # --- APPLIED AUTO-ADJUST: Base Size 16 for V2 ---
+        # --- PER-CELL ADJUSTMENT LOGIC ---
+        thresholds = [3, 6, 2, 2, 2, 2, 2]
+        
+        loc_vals_paras = []
+        for idx, val in enumerate(location_values):
+            thresh = thresholds[idx] if idx < len(thresholds) else 3
+            # Base size 16 for V2
+            para = get_smart_sized_paragraph(val, thresh, base_size=16)
+            loc_vals_paras.append(para)
+
         loc_header = Paragraph('Line Location', location_header_style)
-        loc_vals_paras = [get_auto_sized_paragraph(val, base_size=16) for val in location_values]
         location_data = [[loc_header] + loc_vals_paras]
 
         col_widths = [1.7, 2.9, 1.3, 1.2, 1.3, 1.3, 1.3]
@@ -460,16 +481,23 @@ def generate_bin_labels(df, mtm_models, progress_bar=None, status_text=None):
         col_props = [1.8, 2.4, 0.7, 0.7, 0.7, 0.7, 0.9]
         inner_col_widths = [w * inner_table_width / sum(col_props) for w in col_props]
         
-        # Store Location (Static for now, but can also use auto if needed)
+        # Store Location (Static)
         store_loc_values = extract_store_location_data_from_excel(row)
         store_loc_inner = Table([store_loc_values], colWidths=inner_col_widths, rowHeights=[0.5*cm])
         store_loc_inner.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE'), ('FONTNAME', (0,0),(-1,-1), 'Helvetica-Bold'), ('FONTSIZE', (0,0),(-1,-1), 9)]))
         store_loc_table = Table([[Paragraph("Store Location", bin_desc_style), store_loc_inner]], colWidths=[content_width/3, inner_table_width], rowHeights=[0.5*cm])
         store_loc_table.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE')]))
         
-        # --- APPLIED AUTO-ADJUST: Base Size 9 for Bin Label (Line Location) ---
+        # --- PER-CELL ADJUSTMENT LOGIC (BIN LABEL) ---
         line_loc_values = extract_location_values(row)
-        line_loc_paras = [get_auto_sized_paragraph(val, base_size=9, is_bold=True) for val in line_loc_values]
+        thresholds = [3, 6, 2, 2, 2, 2, 2]
+        
+        line_loc_paras = []
+        for idx, val in enumerate(line_loc_values):
+            thresh = thresholds[idx] if idx < len(thresholds) else 3
+            # Base size 9 for Bin Label inner table
+            para = get_smart_sized_paragraph(val, thresh, base_size=9, is_bold=True)
+            line_loc_paras.append(para)
         
         line_loc_inner = Table([line_loc_paras], colWidths=inner_col_widths, rowHeights=[0.5*cm])
         line_loc_inner.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE')]))
