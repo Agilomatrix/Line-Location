@@ -252,7 +252,7 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
         location_values = extract_location_values(part1)
         location_data = [[Paragraph('Line Location', location_header_style)] + [Paragraph(str(val), location_value_style_v1) for val in location_values]]
         
-        col_props = [2.2, 2.7, 1.3, 1.2, 1.1, 1.2, 1.3]
+        col_props = [2.3, 2.7, 1.3, 1.1, 1.1, 1.2, 1.3]
         location_widths = [4 * cm] + [w * (11 * cm) / sum(col_props) for w in col_props]
         location_table = Table(location_data, colWidths=location_widths, rowHeights=0.8*cm)
         
