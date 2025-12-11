@@ -43,9 +43,6 @@ desc_style = ParagraphStyle(
 location_header_style = ParagraphStyle(
     name='LocationHeader', fontName='Helvetica', fontSize=16, alignment=TA_CENTER, leading=18
 )
-location_value_style_v1 = ParagraphStyle(
-    name='LocationValue_v1', fontName='Helvetica', fontSize=14, alignment=TA_CENTER, leading=16
-)
 location_value_style_v2 = ParagraphStyle(
     name='LocationValue_v2', fontName='Helvetica', fontSize=16, alignment=TA_CENTER, leading=18
 )
@@ -88,6 +85,44 @@ def format_description(desc):
     if not desc or not isinstance(desc, str): desc = str(desc)
     return Paragraph(desc, desc_style)
 
+# --- NEW FUNCTION: Robust Auto-Sizing for Location Values ---
+def get_auto_sized_paragraph(text, base_size=16, alignment=TA_CENTER, is_bold=False):
+    """
+    Dynamically adjusts font size based on text length to fit cells.
+    Specifically tuned for cases like '9M' vs '13.5M'.
+    """
+    text = str(text).strip()
+    length = len(text)
+    
+    # --- Auto-Size Logic ---
+    if length <= 3:
+        # Fits '9M', 'A', '12' perfectly
+        size = base_size
+    elif length <= 6:
+        # Fits '13.5M', '1200' -> Moderate reduction
+        size = base_size - 3
+    elif length <= 9:
+        # Fits longer codes -> Significant reduction
+        size = base_size - 5
+    else:
+        # Very long text -> Max reduction
+        size = base_size - 7
+        
+    # Safety floor to ensure text remains visible (min 6pt)
+    if size < 6: size = 6
+
+    font_name = 'Helvetica-Bold' if is_bold else 'Helvetica'
+    style_name = f'Auto_{size}_{alignment}_{is_bold}_{text}' # Unique style name
+    
+    style = ParagraphStyle(
+        name=style_name, 
+        fontName=font_name, 
+        fontSize=size, 
+        alignment=alignment, 
+        leading=size + 1 
+    )
+    return Paragraph(text, style)
+
 
 # --- Core Logic Functions ---
 def find_required_columns(df):
@@ -102,16 +137,12 @@ def find_required_columns(df):
     part_no_col = find_col([k for k in cols_map if 'PART' in k and ('NO' in k or 'NUM' in k)])
     desc_col = find_col([k for k in cols_map if 'DESC' in k])
     bus_model_col = find_col([k for k in cols_map if 'BUS' in k and 'MODEL' in k])
-    station_no_col = find_col([k for k in cols_map if 'STATION' in k and 'NAME' not in k]) # Avoid Station Name
-    
-    # Specific logic for Station Name vs Station No
+    station_no_col = find_col([k for k in cols_map if 'STATION' in k and 'NAME' not in k]) 
     station_name_col = find_col(['STATION NAME', 'ST. NAME', 'STATION_NAME', 'ST_NAME'])
     
     container_col = find_col([k for k in cols_map if 'CONTAINER' in k])
     qty_bin_col = find_col([k for k in cols_map if 'QTY/BIN' in k or 'QTY_BIN' in k or ('QTY' in k and 'BIN' in k)])
     qty_veh_col = find_col([k for k in cols_map if 'QTY/VEH' in k or 'QTY_VEH' in k or ('QTY' in k and 'VEH' in k)])
-    
-    # Zone Column detection
     zone_col = find_col(['ZONE', 'ABB ZONE', 'ABB_ZONE', 'AREA'])
 
     return {
@@ -133,11 +164,8 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
         return None
 
     df_processed = df.copy()
-    
-    # Rename known columns, keep others (like Zone) as is if they exist
     rename_dict = {v: k for k, v in required_cols.items() if v}
     df_processed.rename(columns=rename_dict, inplace=True)
-    
     df_processed.sort_values(by=['Station No', 'Container'], inplace=True)
 
     final_parts_list = []
@@ -157,12 +185,10 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
                 while search_rack_idx < len(sorted_racks):
                     rack_name, config = sorted_racks[search_rack_idx]
                     levels, capacity = config.get('levels', []), config.get('rack_bin_counts', {}).get(container_type, 0)
-
                     if capacity > 0 and search_level_idx < len(levels):
                         slot_found = True
                         rack_idx, level_idx = search_rack_idx, search_level_idx
                         break
-                    
                     search_level_idx = 0
                     search_rack_idx += 1
                 
@@ -179,8 +205,6 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
                 
                 num_empty_slots = level_capacity - len(parts_for_level)
                 level_items = parts_for_level + ([{'Part No': 'EMPTY'}] * num_empty_slots)
-                
-                # We need to preserve original columns for the template
                 item_template = {col: '' for col in df_processed.columns}
 
                 for cell_idx, item in enumerate(level_items, 1):
@@ -191,7 +215,7 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
                     location_info = {
                         'Rack': base_rack_id, 'Rack No 1st': rack_num_1st, 'Rack No 2nd': rack_num_2nd,
                         'Level': levels[level_idx], 'Cell': str(cell_idx), 'Station No': station_no,
-                        'Rack Key': f"{rack_num_1st}{rack_num_2nd}" # Helper for grouping
+                        'Rack Key': f"{rack_num_1st}{rack_num_2nd}" 
                     }
 
                     if item['Part No'] == 'EMPTY':
@@ -215,11 +239,11 @@ def create_location_key(row):
     return '_'.join([str(row.get(c, '')) for c in ['Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']])
 
 def extract_location_values(row):
+    # 'Bus Model' is the first element, so auto-sizing will apply to it specifically
     return [str(row.get(c, '')) for c in ['Bus Model', 'Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']]
 
 
 # --- PDF Generation (Rack Labels) ---
-# --- UPDATED FUNCTION: Increased Spacer to 1.2*cm for better distribution ---
 def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -250,9 +274,13 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
         part_table2 = Table([['Part No', format_part_no_v1(str(part2.get('Part No','')))], ['Description', format_description_v1(str(part2.get('Description','')))]], colWidths=[4*cm, 11*cm], rowHeights=[1.3*cm, 0.8*cm])
         
         location_values = extract_location_values(part1)
-        location_data = [[Paragraph('Line Location', location_header_style)] + [Paragraph(str(val), location_value_style_v1) for val in location_values]]
         
-        col_props = [2.3, 2.7, 1.3, 1.1, 1.1, 1.2, 1.3]
+        # --- APPLIED AUTO-ADJUST: Base Size 14 for V1 ---
+        loc_header = Paragraph('Line Location', location_header_style)
+        loc_vals_paras = [get_auto_sized_paragraph(val, base_size=14) for val in location_values]
+        location_data = [[loc_header] + loc_vals_paras]
+        
+        col_props = [1.8, 2.7, 1.3, 1.3, 1.3, 1.3, 1.3]
         location_widths = [4 * cm] + [w * (11 * cm) / sum(col_props) for w in col_props]
         location_table = Table(location_data, colWidths=location_widths, rowHeights=0.8*cm)
         
@@ -266,7 +294,6 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        # INCREASED SPACER HERE
         elements.extend([part_table1, Spacer(1, 0.3 * cm), part_table2, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.2 * cm)])
         label_count += 1
         
@@ -274,7 +301,6 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
     buffer.seek(0)
     return buffer, label_summary
 
-# --- UPDATED FUNCTION: Increased Spacer to 1.5*cm for better distribution ---
 def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -302,7 +328,11 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
         part_table = Table([['Part No', format_part_no_v2(str(part1.get('Part No','')))], ['Description', format_description(str(part1.get('Description','')))]], colWidths=[4*cm, 11*cm], rowHeights=[1.9*cm, 2.1*cm])
         
         location_values = extract_location_values(part1)
-        location_data = [[Paragraph('Line Location', location_header_style)] + [Paragraph(str(val), location_value_style_v2) for val in location_values]]
+        
+        # --- APPLIED AUTO-ADJUST: Base Size 16 for V2 ---
+        loc_header = Paragraph('Line Location', location_header_style)
+        loc_vals_paras = [get_auto_sized_paragraph(val, base_size=16) for val in location_values]
+        location_data = [[loc_header] + loc_vals_paras]
 
         col_widths = [1.7, 2.9, 1.3, 1.2, 1.3, 1.3, 1.3]
         location_widths = [4 * cm] + [w * (11 * cm) / sum(col_widths) for w in col_widths]
@@ -316,7 +346,6 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        # INCREASED SPACER HERE
         elements.extend([part_table, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.5 * cm)])
         label_count += 1
         
@@ -431,15 +460,20 @@ def generate_bin_labels(df, mtm_models, progress_bar=None, status_text=None):
         col_props = [1.8, 2.4, 0.7, 0.7, 0.7, 0.7, 0.9]
         inner_col_widths = [w * inner_table_width / sum(col_props) for w in col_props]
         
+        # Store Location (Static for now, but can also use auto if needed)
         store_loc_values = extract_store_location_data_from_excel(row)
         store_loc_inner = Table([store_loc_values], colWidths=inner_col_widths, rowHeights=[0.5*cm])
         store_loc_inner.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE'), ('FONTNAME', (0,0),(-1,-1), 'Helvetica-Bold'), ('FONTSIZE', (0,0),(-1,-1), 9)]))
         store_loc_table = Table([[Paragraph("Store Location", bin_desc_style), store_loc_inner]], colWidths=[content_width/3, inner_table_width], rowHeights=[0.5*cm])
         store_loc_table.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE')]))
         
+        # --- APPLIED AUTO-ADJUST: Base Size 9 for Bin Label (Line Location) ---
         line_loc_values = extract_location_values(row)
-        line_loc_inner = Table([line_loc_values], colWidths=inner_col_widths, rowHeights=[0.5*cm])
-        line_loc_inner.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE'), ('FONTNAME', (0,0),(-1,-1), 'Helvetica-Bold'), ('FONTSIZE', (0,0),(-1,-1), 9)]))
+        line_loc_paras = [get_auto_sized_paragraph(val, base_size=9, is_bold=True) for val in line_loc_values]
+        
+        line_loc_inner = Table([line_loc_paras], colWidths=inner_col_widths, rowHeights=[0.5*cm])
+        line_loc_inner.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE')]))
+        
         line_loc_table = Table([[Paragraph("Line Location", bin_desc_style), line_loc_inner]], colWidths=[content_width/3, inner_table_width], rowHeights=[0.5*cm])
         line_loc_table.setStyle(TableStyle([('GRID', (0,0),(-1,-1), 1.2, colors.black), ('ALIGN', (0,0),(-1,-1), 'CENTER'), ('VALIGN', (0,0),(-1,-1), 'MIDDLE')]))
 
