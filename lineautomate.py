@@ -103,11 +103,11 @@ def get_dynamic_location_style(text, column_type):
     if column_type == 'Bus Model':
         # Logic for Bus Model (Index 0)
         if text_len <= 3: 
-            font_size = 18; leading = 20
+            font_size = 16; leading = 20
         elif text_len <= 5: 
-            font_size = 16; leading = 18
+            font_size = 14; leading = 18
         elif text_len <= 10: 
-            font_size = 13; leading = 15
+            font_size = 12; leading = 15
         else: 
             font_size = 11; leading = 13
             
