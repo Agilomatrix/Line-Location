@@ -43,11 +43,10 @@ desc_style = ParagraphStyle(
 location_header_style = ParagraphStyle(
     name='LocationHeader', fontName='Helvetica', fontSize=16, alignment=TA_CENTER, leading=18
 )
-location_value_style_v1 = ParagraphStyle(
-    name='LocationValue_v1', fontName='Helvetica', fontSize=14, alignment=TA_CENTER, leading=16
-)
-location_value_style_v2 = ParagraphStyle(
-    name='LocationValue_v2', fontName='Helvetica', fontSize=16, alignment=TA_CENTER, leading=18
+
+# Base styles for location (will be overridden by dynamic logic)
+location_value_style_base = ParagraphStyle(
+    name='LocationValue_Base', fontName='Helvetica', alignment=TA_CENTER
 )
 
 # --- Style Definitions (Bin-Label Specific) ---
@@ -88,6 +87,59 @@ def format_description(desc):
     if not desc or not isinstance(desc, str): desc = str(desc)
     return Paragraph(desc, desc_style)
 
+# --- NEW FUNCTION: Dynamic Autosizing for Location Cells ---
+def get_dynamic_location_style(text, column_type):
+    """
+    Returns a ParagraphStyle with font size adjusted based on text length 
+    and specific column type (Bus Model vs Station No vs Others).
+    """
+    text_len = len(str(text))
+    font_name = 'Helvetica'
+    
+    # Defaults
+    font_size = 16
+    leading = 18
+
+    if column_type == 'Bus Model':
+        # Logic for Bus Model (Index 0)
+        if text_len <= 3: 
+            font_size = 18; leading = 20
+        elif text_len <= 5: 
+            font_size = 16; leading = 18
+        elif text_len <= 10: 
+            font_size = 13; leading = 15
+        else: 
+            font_size = 11; leading = 13
+            
+    elif column_type == 'Station No':
+        # Logic for Station No (Index 1) - Often needs to fit "ST-01" etc.
+        if text_len <= 2: 
+            font_size = 18; leading = 20
+        elif text_len <= 5: 
+            font_size = 16; leading = 18
+        elif text_len <= 8: 
+            font_size = 13; leading = 15
+        else: 
+            font_size = 11; leading = 13
+            
+    else:
+        # Logic for standard cells (Rack, Level, Cell) - usually short
+        if text_len <= 2: 
+            font_size = 16; leading = 18
+        elif text_len <= 4:
+            font_size = 14; leading = 16
+        else:
+            font_size = 12; leading = 14
+
+    return ParagraphStyle(
+        name=f'Dyn_{column_type}_{text_len}',
+        parent=location_value_style_base,
+        fontName=font_name,
+        fontSize=font_size,
+        leading=leading,
+        alignment=TA_CENTER
+    )
+
 
 # --- Core Logic Functions ---
 def find_required_columns(df):
@@ -102,16 +154,11 @@ def find_required_columns(df):
     part_no_col = find_col([k for k in cols_map if 'PART' in k and ('NO' in k or 'NUM' in k)])
     desc_col = find_col([k for k in cols_map if 'DESC' in k])
     bus_model_col = find_col([k for k in cols_map if 'BUS' in k and 'MODEL' in k])
-    station_no_col = find_col([k for k in cols_map if 'STATION' in k and 'NAME' not in k]) # Avoid Station Name
-    
-    # Specific logic for Station Name vs Station No
+    station_no_col = find_col([k for k in cols_map if 'STATION' in k and 'NAME' not in k]) 
     station_name_col = find_col(['STATION NAME', 'ST. NAME', 'STATION_NAME', 'ST_NAME'])
-    
     container_col = find_col([k for k in cols_map if 'CONTAINER' in k])
     qty_bin_col = find_col([k for k in cols_map if 'QTY/BIN' in k or 'QTY_BIN' in k or ('QTY' in k and 'BIN' in k)])
     qty_veh_col = find_col([k for k in cols_map if 'QTY/VEH' in k or 'QTY_VEH' in k or ('QTY' in k and 'VEH' in k)])
-    
-    # Zone Column detection
     zone_col = find_col(['ZONE', 'ABB ZONE', 'ABB_ZONE', 'AREA'])
 
     return {
@@ -133,11 +180,8 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
         return None
 
     df_processed = df.copy()
-    
-    # Rename known columns, keep others (like Zone) as is if they exist
     rename_dict = {v: k for k, v in required_cols.items() if v}
     df_processed.rename(columns=rename_dict, inplace=True)
-    
     df_processed.sort_values(by=['Station No', 'Container'], inplace=True)
 
     final_parts_list = []
@@ -180,7 +224,6 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
                 num_empty_slots = level_capacity - len(parts_for_level)
                 level_items = parts_for_level + ([{'Part No': 'EMPTY'}] * num_empty_slots)
                 
-                # We need to preserve original columns for the template
                 item_template = {col: '' for col in df_processed.columns}
 
                 for cell_idx, item in enumerate(level_items, 1):
@@ -191,7 +234,7 @@ def automate_location_assignment(df, base_rack_id, rack_configs, status_text=Non
                     location_info = {
                         'Rack': base_rack_id, 'Rack No 1st': rack_num_1st, 'Rack No 2nd': rack_num_2nd,
                         'Level': levels[level_idx], 'Cell': str(cell_idx), 'Station No': station_no,
-                        'Rack Key': f"{rack_num_1st}{rack_num_2nd}" # Helper for grouping
+                        'Rack Key': f"{rack_num_1st}{rack_num_2nd}"
                     }
 
                     if item['Part No'] == 'EMPTY':
@@ -215,11 +258,11 @@ def create_location_key(row):
     return '_'.join([str(row.get(c, '')) for c in ['Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']])
 
 def extract_location_values(row):
+    # Returns list: [Bus Model, Station No, Rack, R1, R2, Level, Cell]
     return [str(row.get(c, '')) for c in ['Bus Model', 'Station No', 'Rack', 'Rack No 1st', 'Rack No 2nd', 'Level', 'Cell']]
 
 
 # --- PDF Generation (Rack Labels) ---
-# --- UPDATED FUNCTION: Increased Spacer to 1.2*cm for better distribution ---
 def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -249,8 +292,22 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
         part_table1 = Table([['Part No', format_part_no_v1(str(part1.get('Part No','')))], ['Description', format_description_v1(str(part1.get('Description','')))]], colWidths=[4*cm, 11*cm], rowHeights=[1.3*cm, 0.8*cm])
         part_table2 = Table([['Part No', format_part_no_v1(str(part2.get('Part No','')))], ['Description', format_description_v1(str(part2.get('Description','')))]], colWidths=[4*cm, 11*cm], rowHeights=[1.3*cm, 0.8*cm])
         
+        # --- Autosizing Logic for Location Values ---
         location_values = extract_location_values(part1)
-        location_data = [[Paragraph('Line Location', location_header_style)] + [Paragraph(str(val), location_value_style_v1) for val in location_values]]
+        # location_values indices: 0=Bus Model, 1=Station No, 2=Rack, 3=R1, 4=R2, 5=Level, 6=Cell
+        
+        formatted_loc_values = []
+        for idx, val in enumerate(location_values):
+            val_str = str(val)
+            col_type = 'Default'
+            if idx == 0: col_type = 'Bus Model'
+            elif idx == 1: col_type = 'Station No'
+            
+            # Apply dynamic style
+            style = get_dynamic_location_style(val_str, col_type)
+            formatted_loc_values.append(Paragraph(val_str, style))
+
+        location_data = [[Paragraph('Line Location', location_header_style)] + formatted_loc_values]
         
         col_props = [1.8, 2.7, 1.3, 1.3, 1.3, 1.3, 1.3]
         location_widths = [4 * cm] + [w * (11 * cm) / sum(col_props) for w in col_props]
@@ -266,7 +323,6 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        # INCREASED SPACER HERE
         elements.extend([part_table1, Spacer(1, 0.3 * cm), part_table2, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.2 * cm)])
         label_count += 1
         
@@ -274,7 +330,6 @@ def generate_rack_labels_v1(df, progress_bar=None, status_text=None):
     buffer.seek(0)
     return buffer, label_summary
 
-# --- UPDATED FUNCTION: Increased Spacer to 1.5*cm for better distribution ---
 def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -301,8 +356,22 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
 
         part_table = Table([['Part No', format_part_no_v2(str(part1.get('Part No','')))], ['Description', format_description(str(part1.get('Description','')))]], colWidths=[4*cm, 11*cm], rowHeights=[1.9*cm, 2.1*cm])
         
+        # --- Autosizing Logic for Location Values ---
         location_values = extract_location_values(part1)
-        location_data = [[Paragraph('Line Location', location_header_style)] + [Paragraph(str(val), location_value_style_v2) for val in location_values]]
+        # location_values indices: 0=Bus Model, 1=Station No, 2=Rack, 3=R1, 4=R2, 5=Level, 6=Cell
+        
+        formatted_loc_values = []
+        for idx, val in enumerate(location_values):
+            val_str = str(val)
+            col_type = 'Default'
+            if idx == 0: col_type = 'Bus Model'
+            elif idx == 1: col_type = 'Station No'
+            
+            # Apply dynamic style
+            style = get_dynamic_location_style(val_str, col_type)
+            formatted_loc_values.append(Paragraph(val_str, style))
+
+        location_data = [[Paragraph('Line Location', location_header_style)] + formatted_loc_values]
 
         col_widths = [1.7, 2.9, 1.3, 1.2, 1.3, 1.3, 1.3]
         location_widths = [4 * cm] + [w * (11 * cm) / sum(col_widths) for w in col_widths]
@@ -316,7 +385,6 @@ def generate_rack_labels_v2(df, progress_bar=None, status_text=None):
             loc_style_cmds.append(('BACKGROUND', (j+1, 0), (j+1, 0), color))
         location_table.setStyle(TableStyle(loc_style_cmds))
         
-        # INCREASED SPACER HERE
         elements.extend([part_table, Spacer(1, 0.3 * cm), location_table, Spacer(1, 1.5 * cm)])
         label_count += 1
         
@@ -356,7 +424,6 @@ def extract_store_location_data_from_excel(row_data):
     floor = get_clean_value(['ABB FLOOR', 'ABB_FLOOR', 'ABBFLOOR'])
     rack_no = get_clean_value(['ABB RACK NO', 'ABB_RACK_NO', 'ABBRACKNO'])
     level_in_rack = get_clean_value(['ABB LEVEL IN RACK', 'ABB_LEVEL_IN_RACK', 'ABBLEVELINRACK'])
-    
     station_name = get_clean_value(['ST. NAME (Short)', 'ST.NAME (Short)', 'ST NAME (Short)', 'ST. NAME', 'Station Name Short']) 
     
     return [station_name, store_location, zone, location, floor, rack_no, level_in_rack]
@@ -490,23 +557,13 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=0.5*cm, bottomMargin=0.5*cm, leftMargin=1*cm, rightMargin=1*cm)
     elements = []
     
-    # Filter out EMPTY locations
     df = df[df['Part No'].str.upper() != 'EMPTY'].copy()
-    
-    # Pre-process grouping keys
     df['Rack Key'] = df.apply(lambda x: f"{x.get('Rack No 1st', '')}{x.get('Rack No 2nd', '')}", axis=1)
-    
-    # Sort data for consistent display
     df.sort_values(by=['Station No', 'Rack Key', 'Level', 'Cell'], inplace=True)
-    
-    # Group by Station and Rack
     grouped = df.groupby(['Station No', 'Rack Key'])
     total_groups = len(grouped)
-    
-    # Check if 'Zone' exists in the data and has values
     has_zone = 'Zone' in df.columns and df['Zone'].notna().any()
     
-    # Define styles for the Master Table Values
     master_value_style_left = ParagraphStyle(name='MasterValLeft', fontName='Helvetica-Bold', fontSize=13, alignment=TA_LEFT)
     master_value_style_center = ParagraphStyle(name='MasterValCenter', fontName='Helvetica-Bold', fontSize=13, alignment=TA_CENTER)
 
@@ -518,7 +575,6 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
         station_name = str(first_row.get('Station Name', ''))
         bus_model = str(first_row.get('Bus Model', ''))
         
-        # --- Top Header Section ---
         top_logo_img = ""
         if top_logo_file:
             try:
@@ -534,7 +590,6 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
         elements.append(header_table)
         elements.append(Spacer(1, 0.1*cm))
         
-        # --- Master Info Table ---
         master_data = [
             [Paragraph("STATION NAME", ParagraphStyle('H', fontName='Helvetica-Bold', fontSize=12)), 
              Paragraph(station_name, master_value_style_left),
@@ -563,7 +618,6 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
         ]))
         elements.append(master_table)
         
-        # --- Data Table ---
         header_row = ["S.NO", "PART NO", "PART DESCRIPTION", "CONTAINER", "QTY/BIN", "LOCATION"]
         col_widths = [1.5*cm, 4.5*cm, 9.5*cm, 3.5*cm, 2.5*cm, 6.0*cm]
         
@@ -621,15 +675,11 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
         elements.append(data_table)
         elements.append(Spacer(1, 0.2*cm))
         
-        # --- COMPACT FOOTER SECTION ---
         today_date = datetime.date.today().strftime("%d-%m-%Y")
-        
-        # 1. Prepare Logo (Aligned Right)
         fixed_logo_img = Paragraph("<b>Agilomatrix</b>", ParagraphStyle('LogoText', textColor=colors.darkblue, alignment=TA_RIGHT))
         if os.path.exists(fixed_logo_path):
              fixed_logo_img = RLImage(fixed_logo_path, width=4.3*cm, height=1.5*cm)
         
-        # 2. Left Side Content (Stacked closely)
         left_content = [
             Paragraph(f"<i>Creation Date: {today_date}</i>", rl_cell_left_style),
             Spacer(1, 0.2*cm),
@@ -638,10 +688,7 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
             Paragraph("Signature: _______________", rl_cell_left_style)
         ]
 
-        # 3. Right Side Content (Designed By Text + Logo Side-by-Side)
         designed_by_text = Paragraph("Designed by:", ParagraphStyle('DesignedBy', fontName='Helvetica', fontSize=10, alignment=TA_RIGHT))
-        
-        # Nested table for right side to align "Designed by:" left of the Logo
         right_inner_table = Table([[designed_by_text, fixed_logo_img]], colWidths=[3*cm, 4.5*cm])
         right_inner_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -650,7 +697,6 @@ def generate_rack_list_pdf(df, base_rack_id, top_logo_file, top_logo_w, top_logo
             ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ]))
 
-        # 4. Main Footer Table (2 Columns: Left=Verification, Right=Branding)
         footer_table = Table([[left_content, right_inner_table]], colWidths=[20*cm, 7.7*cm])
         footer_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
@@ -673,16 +719,12 @@ def main():
     st.markdown("---")
 
     st.sidebar.title("📄 Label Options")
-    
-    # Updated output options
     output_type = st.sidebar.selectbox("Choose Output Type:", ["Bin Labels", "Rack Labels", "Rack List"])
 
-    # --- RACK LABEL SPECIFIC OPTIONS ---
     rack_label_format = "Single Part"
     if output_type == "Rack Labels":
         rack_label_format = st.sidebar.selectbox("Choose Rack Label Format:", ["Single Part", "Multiple Parts"])
 
-    # --- RACK LIST SPECIFIC OPTIONS ---
     top_logo_file = None
     top_logo_w, top_logo_h = 3.0, 1.0
     if output_type == "Rack List":
@@ -693,7 +735,6 @@ def main():
             top_logo_w = c1.slider("Logo Width (cm)", 1.0, 8.0, 4.0)
             top_logo_h = c2.slider("Logo Height (cm)", 0.5, 4.0, 1.5)
 
-    # --- BIN LABEL SPECIFIC OPTIONS ---
     model1, model2, model3 = "", "", ""
     if output_type == "Bin Labels":
         st.sidebar.markdown("**Enter up to 3 Vehicle Models**")
