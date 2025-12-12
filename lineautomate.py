@@ -114,9 +114,9 @@ def get_dynamic_location_style(text, column_type):
     elif column_type == 'Station No':
         # Logic for Station No (Index 1) - Often needs to fit "ST-01" etc.
         if text_len <= 2: 
-            font_size = 20; leading = 20
+            font_size = 20; leading = 21
         elif text_len <= 5: 
-            font_size = 18; leading = 20
+            font_size = 18; leading = 21
         elif text_len <= 8: 
             font_size = 15; leading = 15
         else: 
