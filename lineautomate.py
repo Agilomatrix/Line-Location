@@ -127,7 +127,7 @@ def get_dynamic_location_style(text, column_type):
         if text_len <= 2: 
             font_size = 16; leading = 18
         elif text_len <= 4:
-            font_size = 14; leading = 16
+            font_size = 14; leading = 18
         else:
             font_size = 12; leading = 14
 
